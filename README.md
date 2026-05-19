@@ -1,117 +1,36 @@
-# DataAIChemist
+# Abacum Data Pilot (FinOps Schema Linter)
 
-DataAIChemist is a data-centric web application built with [Next.js](https://nextjs.org), designed for advanced data validation, correction, and management using AI-powered workflows. It supports CSV/XLSX import/export, natural language search and modification, business rule editing, and more.
-
----
-
-## 🚀 Getting Started
-
-1. **Install dependencies:**
-   ```bash
-   npm install
-   # or
-   yarn install
-   # or
-   pnpm install
-   ```
-
-2. **Run the development server:**
-   ```bash
-   npm run dev
-   # or
-   yarn dev
-   # or
-   pnpm dev
-   # or
-   bun dev
-   ```
-
-3. **Open your browser:**
-   Visit [http://localhost:3000](http://localhost:3000) to use the app.
+Abacum Data Pilot is a high-performance, intelligent data validation and financial modeling application designed for modern Financial Planning & Analysis (FP&A) teams. It solves the "chaos phase" of mid-market client onboarding by acting as a dynamic, client-side data linter that cleans unstructured transaction logs, audits operational guidelines, and runs sandbox financial simulations.
 
 ---
 
-## 📂 Sample Data
+## Core Features
 
-Sample CSV files (`clients.csv`, `workers.csv`, `tasks.csv`) are included in the `public` folder.
+### 1. Dynamic Ingestion Ingest Terminal
+* **Dynamic File Drag-and-Drop:** Breaks away from rigid database requirements. Drag and drop any variable number ($N$) of raw ledger CSV or spreadsheet files simultaneously.
+* **Smart Schema Mapper:** Bridges schema drift anomalies. Instantly maps custom tracking columns (e.g., `Cost`, `Payout`, `Value`) to core financial target inputs using case-insensitive lookup fallbacks.
 
-**To test with sample data:**
-- Go to the main page of the app.
-- Click the **"Upload Sample Data"** button.
-- The app will automatically load the sample datasets for you to explore and test features.
+### 2. High-Performance Financial Ledger
+* **Reactive Data Grid Matrix:** Displays raw ingestion tables with smooth rendering performance.
+* **Inline Sheet Editing:** Double-click any cell to adjust values or clean formats manually with instant client-side field validation.
 
----
+### 3. Data Validation Console
+* **Automated Data Quality Scoring:** Compiles structural syntax anomalies across datasets and exposes an absolute quality telemetry metric.
+* **Deep-Link Error Logs:** Identifies syntax errors (like plain text notes typed inside a JSON column). Clicking an error flags the exact target row in the ledger grid view.
 
-## ✨ Features
+### 4. Custom Data Auditing Controls
+* **Custom Guardrails Builder:** Allows finance teams to build active rules (e.g., *"Flag transactions where amount is less than $1000"*).
+* **Asynchronous Risk Scanner:** Scans entire row arrays in the background, tagging compliance anomalies and syncing status badges dynamically.
 
-- **AI-powered Data Validation & Correction:**  
-  Use Gemini AI to check, validate, and auto-correct your datasets.
-- **CSV/XLSX Import & Export:**  
-  Upload and download data in standard formats.
-- **Natural Language Search & Modification:**  
-  Query and update your data using plain English.
-- **Business Rule Editor:**  
-  Add, edit, and manage business rules with natural language support.
-- **Priority & Heuristic Settings:**  
-  Fine-tune task assignment logic with adjustable weights and criteria.
-- **Comprehensive UI:**  
-  Modern, responsive interface built with Shadcn UI and Lucide icons.
+### 5. Sandboxed Scenario Planner
+* **Real-Time Simulation Controls:** Visual sliders let users model "What-If" business decisions (Revenue Growth, Opex Cuts) on the fly.
+* **Zero-Constant Calculation Engine:** Features a dynamic math pipeline that derives cash runway, profit margins, and burn rates directly from the live dataset metrics and manual user cash reserve inputs.
 
 ---
 
-## 🗂️ Project Structure
+## Architecture & Technical Stack
 
-```
-src/
-  components/         # React components (DataGrid, NaturalSearch, RulesEditor, etc.)
-  lib/                # Utility libraries (AI, CSV/XLSX parsing, validation, etc.)
-  store/              # Redux store and slices
-  types/              # TypeScript type definitions
-public/
-  clients.csv         # Sample client data
-  workers.csv         # Sample worker data
-  tasks.csv           # Sample task data
-```
-
----
-
-## 📝 Customization
-
-- **Add your own data:**  
-  Use the upload feature to import your own CSV/XLSX files.
-- **Edit rules and priorities:**  
-  Use the Rules Editor and Priority Settings to customize business logic.
-
----
-
-## 📚 Learn More
-
-- [Next.js Documentation](https://nextjs.org/docs)
-- [Shadcn UI](https://ui.shadcn.com/)
-- [Lucide Icons](https://lucide.dev/)
-- [PapaParse (CSV)](https://www.papaparse.com/)
-- [xlsx (SheetJS)](https://sheetjs.com/)
-
----
-
-## 🚀 Deploy
-
-Deploy easily on [Vercel](https://vercel.com/) or your preferred platform.  
-See [Next.js deployment docs](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
-
----
-
-## 🤖 AI API
-
-This project uses the Gemini API for AI-powered features.  
-Set your API key in your environment variables as `NEXT_PUBLIC_GEMINI_API_KEY`.
-
----
-
-## 🧪 Contributing
-
-Pull requests and feedback are welcome!
-
----
-
-**Enjoy exploring and managing your data with DataAIChemist!**
+* **Frontend Framework:** Next.js, TypeScript, Tailwind CSS, shadcn/ui.
+* **Client-Side Storage Tier (Hot Performance):** IndexedDB (via a lightweight async wrapper). Replaces limited `localStorage` systems to effortlessly buffer 10,000+ data rows at 60fps with zero main UI thread blocking.
+* **Server-Side Storage Tier (Production Persistence):** Supabase / PostgreSQL relational API handling schema validation states and auditing control rules.
+* **AI Processing Layer:** Google AI Studio (Gemini) / Groq Cloud API endpoints handling batch structural row corrections and multi-row layout sanitization.

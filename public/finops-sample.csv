@@ -1,0 +1,11 @@
+Transaction ID,Period,Vendor,Account Code,Description,Total Cost,Attributes JSON
+TX-1001,2026-01,Stripe,REV-SUBS,Subscription revenue,125000,"{""segment"":""saas"",""region"":""us""}"
+TX-1002,2026-01,AWS,COGS-CLOUD,Cloud infrastructure,-28000,"{""owner"":""platform""}"
+TX-1003,2026-01,LinkedIn,OPEX-HIRING,Recruiting campaign,-8400,pending review
+TX-1004,2026-02,Google Ads,OPEX-MARKETING,Paid acquisition,-15500,"{""channel"":""search""}"
+TX-1005,2026-02,Acme Payroll,OPEX-PEOPLE,Engineering payroll,-72000,"{""department"":""engineering""}"
+TX-1006,2026-02,Salesforce,OPEX-SOFTWARE,CRM platform,-9200,"{""renewal"":true}"
+TX-1007,2026-03,Enterprise Customer,REV-ENTERPRISE,Annual contract,180000,"{""segment"":""enterprise""}"
+TX-1008,2026-03,Notion,OPEX-SOFTWARE,Knowledge base,-2400,"{""team"":""company""}"
+TX-1009,2026-03,Office Lease,OPEX-FACILITIES,HQ rent,-18000,"{""location"":""remote-hub""}"
+TX-1010,2026-03,Manual Accrual,OPEX-REVIEW,Pending invoice,pending review,"{""needsReview"":true}"

@@ -1,639 +1,405 @@
 "use client"
 
-import { useState } from "react"
-import { useSelector, useDispatch } from "react-redux"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import type { RootState } from "@/store"
-import { updateClient, updateWorker, updateTask, setValidationErrors, setClients, setWorkers, setTasks } from "@/store"
-import { validateAll } from "@/lib/validation"
-import { saveClients, saveWorkers, saveTasks, saveValidationErrors } from "@/lib/indexeddb"
-import type { ValidationError, Client, Worker, Task, EntityType } from "@/types"
-import { Edit, Save, X } from "lucide-react"
-import { correctDataWithAI } from "@/lib/gemini"
-import { checkAndCorrectAllData, validateDataCompleteness } from "@/lib/ai-data-checker"
-import { exportToCSV } from "@/lib/file-handler"
-import { Wand2, Download, Loader2, Shield, AlertTriangle } from "lucide-react"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
-import { Textarea } from "@/components/ui/textarea"
+import { useMemo, useState } from "react"
+import { AlertCircle, CheckCircle2, Download, Loader2, Save, ShieldCheck, Sparkles, Wand2, X } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { AlertCircle, XCircle } from "lucide-react"
-import { CheckCircle } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { Card, CardContent } from "@/components/ui/card"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Textarea } from "@/components/ui/textarea"
+import { exportToCSV } from "@/lib/file-handler"
+import { saveDataset, saveRules, saveValidationIssues } from "@/lib/indexeddb"
+import { correctDatasetWithGemini } from "@/lib/gemini"
+import { compileRuleForDataset } from "@/lib/rule-compiler"
+import { updateCell, validateDatasets } from "@/lib/validation"
+import { appActions, useAppStore } from "@/store"
 
-type CellEditState = { entity: string; row: number; field: string } | null
-type CorrectionStatus = "idle" | "success" | "error"
+type EditingCell = { rowIndex: number; field: string } | null
 
 export default function DataGrid() {
-  const dispatch = useDispatch()
-  const { clients, workers, tasks, validationErrors } = useSelector((state: RootState) => state.app)
-  const [editingCell, setEditingCell] = useState<CellEditState>(null)
+  const { activeDatasetId, datasets, focusTarget, rules, validationIssues } = useAppStore((state) => ({
+    activeDatasetId: state.activeDatasetId,
+    datasets: state.datasets,
+    focusTarget: state.focusTarget,
+    rules: state.rules,
+    validationIssues: state.validationIssues,
+  }))
+  const [editingCell, setEditingCell] = useState<EditingCell>(null)
   const [editValue, setEditValue] = useState("")
-  const [aiCorrectionDialog, setAiCorrectionDialog] = useState(false)
-  const [correctionInstruction, setCorrectionInstruction] = useState("")
-  const [isApplyingCorrection, setIsApplyingCorrection] = useState(false)
-  const [isRunningComprehensiveCheck, setIsRunningComprehensiveCheck] = useState(false)
-  const [correctionStatus, setCorrectionStatus] = useState<CorrectionStatus>("idle")
-  const [correctionMessage, setCorrectionMessage] = useState("")
-  const [activeTab, setActiveTab] = useState("clients")
+  const [instruction, setInstruction] = useState("")
+  const [dialogOpen, setDialogOpen] = useState(false)
+  const [isCorrecting, setIsCorrecting] = useState(false)
+  const [notice, setNotice] = useState("")
+  const [error, setError] = useState("")
+  const [applyingRuleId, setApplyingRuleId] = useState<string | null>(null)
 
-  const dataCompleteness = validateDataCompleteness(clients, workers, tasks)
+  const activeDataset = useMemo(
+    () => datasets.find((dataset) => dataset.id === activeDatasetId) ?? datasets[0],
+    [activeDatasetId, datasets],
+  )
 
-  const getValidationErrorsForCell = (entity: string, rowIndex: number, field: string): ValidationError[] => {
-    return validationErrors.filter(
-      (error) => error.entity === entity && error.rowIndex === rowIndex && error.field === field,
-    )
+  const activeIssues = useMemo(
+    () => validationIssues.filter((issue) => issue.datasetId === activeDataset?.id),
+    [activeDataset?.id, validationIssues],
+  )
+
+  async function persistRows(rows: typeof activeDataset.rows) {
+    if (!activeDataset) return
+    const updatedDataset = { ...activeDataset, rows, updatedAt: new Date().toISOString() }
+    await saveDataset(updatedDataset)
+    appActions.updateDatasetRows(activeDataset.id, rows)
+    const nextDatasets = datasets.map((dataset) => (dataset.id === activeDataset.id ? updatedDataset : dataset))
+    const issues = validateDatasets(nextDatasets, rules)
+    await saveValidationIssues(issues)
+    appActions.setValidationIssues(issues)
   }
 
-  const handleCellEdit = (entity: string, rowIndex: number, field: string, currentValue: string | number) => {
-    setEditingCell({ entity, row: rowIndex, field })
-    setEditValue(String(currentValue || ""))
-  }
+  async function applyRule(ruleId: string) {
+    if (!activeDataset) return
+    const rule = rules.find((item) => item.id === ruleId)
+    if (!rule) return
 
-  const handleSaveEdit = async () => {
-    if (!editingCell) return
+    setApplyingRuleId(ruleId)
+    setError("")
+    setNotice("")
 
-    const { entity, row, field } = editingCell
-    let updatedValue: string | number = editValue
-
-    if (field === "PriorityLevel" || field === "Duration" || field === "MaxLoadPerPhase" || field === "MaxConcurrent") {
-      updatedValue = Number(editValue)
-    }
-
-    try {
-      if (entity === "clients") {
-        const updatedClient = { ...clients[row], [field]: updatedValue }
-        dispatch(updateClient({ index: row, client: updatedClient }))
-        const updatedClients = [...clients]
-        updatedClients[row] = updatedClient
-        await saveClients(updatedClients)
-      } else if (entity === "workers") {
-        const updatedWorker = { ...workers[row], [field]: updatedValue }
-        dispatch(updateWorker({ index: row, worker: updatedWorker }))
-        const updatedWorkers = [...workers]
-        updatedWorkers[row] = updatedWorker
-        await saveWorkers(updatedWorkers)
-      } else if (entity === "tasks") {
-        const updatedTask = { ...tasks[row], [field]: updatedValue }
-        dispatch(updateTask({ index: row, task: updatedTask }))
-        const updatedTasks = [...tasks]
-        updatedTasks[row] = updatedTask
-        await saveTasks(updatedTasks)
+    let compiledRule = rule
+    if (!rule.formulaAvailable || !rule.formula || rule.aiEvaluationRequired) {
+      try {
+        const result = await compileRuleForDataset(rule, activeDataset)
+        compiledRule = {
+          ...rule,
+          formulaAvailable: result.formulaAvailable,
+          formula: result.formula,
+          aiEvaluationRequired: result.aiEvaluationRequired,
+          compiledAt: new Date().toISOString(),
+        }
+        setNotice(result.summary)
+      } catch (err) {
+        setApplyingRuleId(null)
+        setError(err instanceof Error ? err.message : "Rule compilation failed.")
+        return
       }
-
-      const errors = validateAll(clients, workers, tasks)
-      await saveValidationErrors(errors)
-      dispatch(setValidationErrors(errors))
-
-      setEditingCell(null)
-      setEditValue("")
-    } catch {
-      console.error("Failed to save edit")
     }
+
+    const updatedDataset = {
+      ...activeDataset,
+      appliedRuleIds: Array.from(new Set([...activeDataset.appliedRuleIds, ruleId])),
+      updatedAt: new Date().toISOString(),
+    }
+    const updatedRules = rules.map((item) =>
+      item.id === ruleId
+        ? { ...compiledRule, targetDatasetIds: Array.from(new Set([...compiledRule.targetDatasetIds, activeDataset.id])) }
+        : item,
+    )
+    const nextDatasets = datasets.map((dataset) => (dataset.id === activeDataset.id ? updatedDataset : dataset))
+    await Promise.all([saveDataset(updatedDataset), saveRules(updatedRules)])
+    const issues = validateDatasets(nextDatasets, updatedRules)
+    await saveValidationIssues(issues)
+    appActions.updateDataset(updatedDataset)
+    appActions.setRules(updatedRules)
+    appActions.setValidationIssues(issues)
+    const breakCount = issues.filter((issue) => issue.datasetId === activeDataset.id && issue.ruleId === ruleId).length
+    setNotice(`${compiledRule.name} applied to ${activeDataset.name}. ${breakCount} row${breakCount === 1 ? "" : "s"} breaking this rule.`)
+    setApplyingRuleId(null)
   }
 
-  const handleCancelEdit = () => {
+  async function updateAmountMapping(sourceColumn: string) {
+    if (!activeDataset) return
+    const updatedDataset = {
+      ...activeDataset,
+      schemaMapping: { ...activeDataset.schemaMapping, Amount: sourceColumn },
+      updatedAt: new Date().toISOString(),
+    }
+    await saveDataset(updatedDataset)
+    appActions.updateDataset(updatedDataset)
+    setNotice(`Amount is now mapped to ${sourceColumn}.`)
+  }
+
+  async function saveEdit() {
+    if (!activeDataset || !editingCell) return
+    await persistRows(updateCell(activeDataset.rows, editingCell.rowIndex, editingCell.field, editValue))
     setEditingCell(null)
     setEditValue("")
   }
 
-  const handleComprehensiveDataCheck = async () => {
-    if (clients.length === 0 && workers.length === 0 && tasks.length === 0) {
-      setCorrectionStatus("error")
-      setCorrectionMessage("No data available to check. Please upload data first.")
+  async function applyCorrection(rowIndex?: number, field?: string, overrideInstruction?: string) {
+    if (!activeDataset) return
+    const prompt = (overrideInstruction ?? instruction).trim()
+    if (!prompt) {
+      setError("Add a correction instruction first.")
       return
     }
 
-    setIsRunningComprehensiveCheck(true)
-    setCorrectionStatus("idle")
-    setCorrectionMessage("")
-
+    setIsCorrecting(true)
+    setError("")
+    setNotice("")
     try {
-      const result = await checkAndCorrectAllData(clients, workers, tasks)
-
-      if (!result.success) {
-        throw new Error(result.error || "Comprehensive data check failed")
-      }
-
-      if (!result.correctedData) {
-        throw new Error("No corrected data returned")
-      }
-
-      dispatch(setClients(result.correctedData.clients))
-      dispatch(setWorkers(result.correctedData.workers))
-      dispatch(setTasks(result.correctedData.tasks))
-
-      await Promise.all([
-        saveClients(result.correctedData.clients),
-        saveWorkers(result.correctedData.workers),
-        saveTasks(result.correctedData.tasks),
-      ])
-
-      const errors = validateAll(result.correctedData.clients, result.correctedData.workers, result.correctedData.tasks)
-      await saveValidationErrors(errors)
-      dispatch(setValidationErrors(errors))
-
-      setCorrectionStatus("success")
-      setCorrectionMessage(
-        `Comprehensive data check completed! Fixed issues across ${result.correctedData.clients.length} clients, ${result.correctedData.workers.length} workers, and ${result.correctedData.tasks.length} tasks.`,
-      )
-    } catch (error) {
-      console.error("Comprehensive data check failed:", error)
-      setCorrectionStatus("error")
-      setCorrectionMessage(error instanceof Error ? error.message : "Comprehensive data check failed")
+      const result = await correctDatasetWithGemini({ dataset: activeDataset, instruction: prompt, rowIndex, field })
+      await persistRows(result.rows)
+      setNotice(result.summary)
+      setInstruction("")
+      setDialogOpen(false)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "AI correction failed.")
     } finally {
-      setIsRunningComprehensiveCheck(false)
+      setIsCorrecting(false)
     }
   }
 
-  const handleAICorrection = async () => {
-    if (!correctionInstruction.trim()) return
-
-    setIsApplyingCorrection(true)
-    setCorrectionStatus("idle")
-    setCorrectionMessage("")
-
-    try {
-      let entityType: EntityType
-      let currentData: Client[] | Worker[] | Task[]
-
-      switch (activeTab) {
-        case "clients":
-          entityType = "clients"
-          currentData = clients
-          break
-        case "workers":
-          entityType = "workers"
-          currentData = workers
-          break
-        case "tasks":
-          entityType = "tasks"
-          currentData = tasks
-          break
-        default:
-          throw new Error("Invalid entity type")
-      }
-
-      if (currentData.length === 0) {
-        throw new Error(`No ${entityType} data to correct`)
-      }
-
-      const correctedData = await correctDataWithAI(currentData, entityType, correctionInstruction)
-
-      if (entityType === "clients") {
-        dispatch(setClients(correctedData as Client[]))
-        await saveClients(correctedData as Client[])
-      } else if (entityType === "workers") {
-        dispatch(setWorkers(correctedData as Worker[]))
-        await saveWorkers(correctedData as Worker[])
-      } else if (entityType === "tasks") {
-        dispatch(setTasks(correctedData as Task[]))
-        await saveTasks(correctedData as Task[])
-      }
-
-      const errors = validateAll(
-        entityType === "clients" ? (correctedData as Client[]) : clients,
-        entityType === "workers" ? (correctedData as Worker[]) : workers,
-        entityType === "tasks" ? (correctedData as Task[]) : tasks,
-      )
-      await saveValidationErrors(errors)
-      dispatch(setValidationErrors(errors))
-
-      setCorrectionStatus("success")
-      setCorrectionMessage(`AI corrections applied successfully to ${correctedData.length} ${entityType} records!`)
-      setCorrectionInstruction("")
-      setAiCorrectionDialog(false)
-    } catch (error) {
-      console.error("AI correction failed:", error)
-      setCorrectionStatus("error")
-      setCorrectionMessage(error instanceof Error ? error.message : "AI correction failed")
-    } finally {
-      setIsApplyingCorrection(false)
-    }
-  }
-
-  const handleDownloadCorrectedData = () => {
-    try {
-      let dataToExport: Record<string, unknown>[]
-      let filename: string
-
-      switch (activeTab) {
-        case "clients":
-          dataToExport = clients
-          filename = "corrected-clients.csv"
-          break
-        case "workers":
-          dataToExport = workers
-          filename = "corrected-workers.csv"
-          break
-        case "tasks":
-          dataToExport = tasks
-          filename = "corrected-tasks.csv"
-          break
-        default:
-          throw new Error("Invalid entity type")
-      }
-
-      if (dataToExport.length === 0) {
-        setCorrectionStatus("error")
-        setCorrectionMessage(`No ${activeTab} data to download`)
-        return
-      }
-
-      exportToCSV(dataToExport, filename)
-      setCorrectionStatus("success")
-      setCorrectionMessage(`${activeTab} data downloaded successfully!`)
-    } catch {
-      setCorrectionStatus("error")
-      setCorrectionMessage("Download failed")
-    }
-  }
-
-  const renderEditableCell = (entity: string, rowIndex: number, field: string, value: string | number) => {
-    const isEditing = editingCell?.entity === entity && editingCell?.row === rowIndex && editingCell?.field === field
-    const errors = getValidationErrorsForCell(entity, rowIndex, field)
-    const hasError = errors.length > 0
-
-    if (isEditing) {
-      return (
-        <div className="flex items-center space-x-2">
-          <Input
-            value={editValue}
-            onChange={(e) => setEditValue(e.target.value)}
-            className="h-8 text-sm"
-            onKeyDown={(e) => {
-              if (e.key === "Enter") handleSaveEdit()
-              if (e.key === "Escape") handleCancelEdit()
-            }}
-            autoFocus
-          />
-          <Button size="sm" variant="ghost" onClick={handleSaveEdit}>
-            <Save className="h-3 w-3" />
-          </Button>
-          <Button size="sm" variant="ghost" onClick={handleCancelEdit}>
-            <X className="h-3 w-3" />
-          </Button>
-        </div>
-      )
-    }
-
+  if (!activeDataset) {
     return (
-      <div
-        className={`group cursor-pointer p-2 rounded ${hasError ? "hover:bg-red-50" : "hover:bg-gray-50"}`}
-        onClick={() => handleCellEdit(entity, rowIndex, field, value)}
-      >
-        <div className="flex items-center justify-between">
-          <span className={hasError ? "text-red-600 font-medium" : ""}>{String(value || "")}</span>
-          <Edit className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />
-        </div>
-      </div>
+      <section className="p-6">
+        <Card className="rounded-md">
+          <CardContent className="p-10 text-center text-slate-500">Upload a financial file to open the ledger grid.</CardContent>
+        </Card>
+      </section>
     )
   }
 
-  const ClientsTable = () => (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead className="w-16">Sr No</TableHead>
-          <TableHead>Client ID</TableHead>
-          <TableHead>Client Name</TableHead>
-          <TableHead>Priority Level</TableHead>
-          <TableHead>Requested Task IDs</TableHead>
-          <TableHead>Group Tag</TableHead>
-          <TableHead>Attributes JSON</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {clients.map((client, index) => (
-          <TableRow key={client.ClientID}>
-            <TableCell className="text-gray-500 font-mono text-sm">{index + 1}</TableCell>
-            <TableCell>{renderEditableCell("clients", index, "ClientID", client.ClientID)}</TableCell>
-            <TableCell>{renderEditableCell("clients", index, "ClientName", client.ClientName)}</TableCell>
-            <TableCell>{renderEditableCell("clients", index, "PriorityLevel", client.PriorityLevel)}</TableCell>
-            <TableCell>{renderEditableCell("clients", index, "RequestedTaskIDs", client.RequestedTaskIDs)}</TableCell>
-            <TableCell>{renderEditableCell("clients", index, "GroupTag", client.GroupTag)}</TableCell>
-            <TableCell>{renderEditableCell("clients", index, "AttributesJSON", client.AttributesJSON)}</TableCell>
-          </TableRow>
-        ))}
-      </TableBody>
-    </Table>
-  )
-
-  const WorkersTable = () => (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead className="w-16">Sr No</TableHead>
-          <TableHead>Worker ID</TableHead>
-          <TableHead>Worker Name</TableHead>
-          <TableHead>Skills</TableHead>
-          <TableHead>Available Slots</TableHead>
-          <TableHead>Max Load Per Phase</TableHead>
-          <TableHead>Worker Group</TableHead>
-          <TableHead>Qualification Level</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {workers.map((worker, index) => (
-          <TableRow key={worker.WorkerID}>
-            <TableCell className="text-gray-500 font-mono text-sm">{index + 1}</TableCell>
-            <TableCell>{renderEditableCell("workers", index, "WorkerID", worker.WorkerID)}</TableCell>
-            <TableCell>{renderEditableCell("workers", index, "WorkerName", worker.WorkerName)}</TableCell>
-            <TableCell>{renderEditableCell("workers", index, "Skills", worker.Skills)}</TableCell>
-            <TableCell>{renderEditableCell("workers", index, "AvailableSlots", worker.AvailableSlots)}</TableCell>
-            <TableCell>{renderEditableCell("workers", index, "MaxLoadPerPhase", worker.MaxLoadPerPhase)}</TableCell>
-            <TableCell>{renderEditableCell("workers", index, "WorkerGroup", worker.WorkerGroup)}</TableCell>
-            <TableCell>
-              {renderEditableCell("workers", index, "QualificationLevel", worker.QualificationLevel)}
-            </TableCell>
-          </TableRow>
-        ))}
-      </TableBody>
-    </Table>
-  )
-
-  const TasksTable = () => (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead className="w-16">Sr No</TableHead>
-          <TableHead>Task ID</TableHead>
-          <TableHead>Task Name</TableHead>
-          <TableHead>Category</TableHead>
-          <TableHead>Duration</TableHead>
-          <TableHead>Required Skills</TableHead>
-          <TableHead>Preferred Phases</TableHead>
-          <TableHead>Max Concurrent</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {tasks.map((task, index) => (
-          <TableRow key={task.TaskID}>
-            <TableCell className="text-gray-500 font-mono text-sm">{index + 1}</TableCell>
-            <TableCell>{renderEditableCell("tasks", index, "TaskID", task.TaskID)}</TableCell>
-            <TableCell>{renderEditableCell("tasks", index, "TaskName", task.TaskName)}</TableCell>
-            <TableCell>{renderEditableCell("tasks", index, "Category", task.Category)}</TableCell>
-            <TableCell>{renderEditableCell("tasks", index, "Duration", task.Duration)}</TableCell>
-            <TableCell>{renderEditableCell("tasks", index, "RequiredSkills", task.RequiredSkills)}</TableCell>
-            <TableCell>{renderEditableCell("tasks", index, "PreferredPhases", task.PreferredPhases)}</TableCell>
-            <TableCell>{renderEditableCell("tasks", index, "MaxConcurrent", task.MaxConcurrent)}</TableCell>
-          </TableRow>
-        ))}
-      </TableBody>
-    </Table>
-  )
-
   return (
-    <div className="space-y-6 p-4 md:p-6">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+    <section className="space-y-5 p-4 md:p-6">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <h2 className="text-2xl md:text-3xl font-bold text-gray-900">Data Grid</h2>
-          <p className="text-gray-600 mt-2">View, edit, and AI-correct your data with comprehensive validation</p>
+          <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">Interactive Financial Ledger</h1>
+          <p className="mt-1 text-sm text-slate-600">Double-click a cell to edit it. Corrections persist to IndexedDB immediately.</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button
-            onClick={handleComprehensiveDataCheck}
-            disabled={
-              isRunningComprehensiveCheck || (clients.length === 0 && workers.length === 0 && tasks.length === 0)
-            }
-            className="bg-green-600 hover:bg-green-700"
-          >
-            {isRunningComprehensiveCheck ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Checking...
-              </>
-            ) : (
-              <>
-                <Shield className="mr-2 h-4 w-4" />
-                AI Data Check & Fix
-              </>
-            )}
-          </Button>
-
-          <Dialog open={aiCorrectionDialog} onOpenChange={setAiCorrectionDialog}>
+          <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
             <DialogTrigger asChild>
-              <Button variant="outline" size="sm">
+              <Button>
                 <Wand2 className="mr-2 h-4 w-4" />
                 AI Correct Data
               </Button>
             </DialogTrigger>
-            <DialogContent className="max-w-2xl">
+            <DialogContent className="rounded-md">
               <DialogHeader>
-                <DialogTitle>AI Data Correction</DialogTitle>
+                <DialogTitle>Batch data correction</DialogTitle>
               </DialogHeader>
-              <div className="space-y-4">
-                <div>
-                  <p className="text-sm text-gray-600 mb-3">
-                    Describe what changes you want to make to the <strong>{activeTab}</strong> data. AI will apply your
-                    instructions to all records.
-                  </p>
-                  <Textarea
-                    value={correctionInstruction}
-                    onChange={(e) => setCorrectionInstruction(e.target.value)}
-                    placeholder="Example: 'If AttributesJSON field is not valid JSON, create a JSON object with key 'message' and the original content as value'"
-                    rows={4}
-                    className="resize-none"
-                  />
-                </div>
-
-                <div className="bg-blue-50 p-3 rounded-lg">
-                  <p className="text-sm text-blue-800 font-medium mb-2">Example Instructions:</p>
-                  <ul className="text-xs text-blue-700 space-y-1">
-                    <li>
-                      • &quot;Fix all invalid JSON in AttributesJSON field by wrapping content in {"{"}
-                      &apos;message&apos;: &apos;content&apos;{"}"}
-                      &quot;
-                    </li>
-                    <li>• &quot;Convert all Skills fields to lowercase and remove extra spaces&quot;</li>
-                    <li>• &quot;Standardize all GroupTag values to proper case (GroupA, GroupB, etc.)&quot;</li>
-                    <li>• &quot;If Duration is 0 or negative, set it to 1&quot;</li>
-                  </ul>
-                </div>
-
-                {correctionStatus === "error" && (
-                  <Alert variant="destructive">
-                    <AlertCircle className="h-4 w-4" />
-                    <AlertDescription>{correctionMessage}</AlertDescription>
-                  </Alert>
-                )}
-
-                <div className="flex flex-col-reverse sm:flex-row justify-end gap-2">
-                  <Button variant="outline" onClick={() => setAiCorrectionDialog(false)}>
-                    Cancel
-                  </Button>
-                  <Button onClick={handleAICorrection} disabled={!correctionInstruction.trim() || isApplyingCorrection}>
-                    {isApplyingCorrection ? (
-                      <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Applying...
-                      </>
-                    ) : (
-                      <>
-                        <Wand2 className="mr-2 h-4 w-4" />
-                        Apply AI Correction
-                      </>
-                    )}
-                  </Button>
-                </div>
-              </div>
+              <Textarea
+                value={instruction}
+                onChange={(event) => setInstruction(event.target.value)}
+                placeholder="Standardize account codes to uppercase, trim text fields, and wrap invalid JSON as a message object."
+                rows={5}
+              />
+              <Button onClick={() => applyCorrection()} disabled={isCorrecting || !instruction.trim()}>
+                {isCorrecting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
+                Apply to {activeDataset.name}
+              </Button>
             </DialogContent>
           </Dialog>
-
-          <Button variant="outline" size="sm" onClick={handleDownloadCorrectedData}>
+          <Button variant="outline" onClick={() => exportToCSV(activeDataset.rows, `${activeDataset.name}-clean.csv`)}>
             <Download className="mr-2 h-4 w-4" />
-            Download {activeTab}
+            Export CSV
           </Button>
         </div>
       </div>
 
-      {!dataCompleteness.isComplete && (
-        <Alert>
-          <AlertTriangle className="h-4 w-4" />
-          <AlertDescription>
-            <div>
-              <p className="font-medium mb-2">Incomplete Dataset Detected:</p>
-              <ul className="text-sm space-y-1">
-                {dataCompleteness.recommendations.map((rec, index) => (
-                  <li key={index}>• {rec}</li>
-                ))}
-              </ul>
-              <p className="text-sm mt-2">
-                The AI Data Check & Fix will work with available data, but full validation requires all datasets.
-              </p>
-            </div>
-          </AlertDescription>
-        </Alert>
-      )}
-
-      {correctionStatus === "success" && (
-        <Alert>
-          <CheckCircle className="h-4 w-4" />
-          <AlertDescription>{correctionMessage}</AlertDescription>
-        </Alert>
-      )}
-
-      {correctionStatus === "error" && (
-        <Alert variant="destructive">
-          <AlertCircle className="h-4 w-4" />
-          <AlertDescription>{correctionMessage}</AlertDescription>
-        </Alert>
-      )}
-
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="grid w-full grid-cols-3">
-          <TabsTrigger value="clients">Clients ({clients.length})</TabsTrigger>
-          <TabsTrigger value="workers">Workers ({workers.length})</TabsTrigger>
-          <TabsTrigger value="tasks">Tasks ({tasks.length})</TabsTrigger>
+      <Tabs value={activeDataset.id} onValueChange={(value) => appActions.setActiveDatasetId(value)}>
+        <TabsList className="h-auto max-w-full flex-wrap justify-start">
+          {datasets.map((dataset) => (
+            <TabsTrigger key={dataset.id} value={dataset.id} className="gap-2">
+              {dataset.name}
+              <Badge variant="secondary">{dataset.rows.length}</Badge>
+            </TabsTrigger>
+          ))}
         </TabsList>
-
-        <TabsContent value="clients">
-          <Card>
-            <CardHeader>
-              <CardTitle>Clients Data</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="overflow-x-auto">
-                <ClientsTable />
-              </div>
-              {validationErrors.filter((error) => error.entity === "clients").length > 0 && (
-                <div className="mt-6 p-4 bg-red-50 border border-red-200 rounded-lg">
-                  <h4 className="font-medium text-red-800 mb-3">Validation Errors in Clients Data:</h4>
-                  <div className="space-y-2">
-                    {validationErrors
-                      .filter((error) => error.entity === "clients")
-                      .map((error) => (
-                        <div key={error.id} className="flex items-start space-x-3 text-sm">
-                          <XCircle className="h-4 w-4 text-red-500 mt-0.5 flex-shrink-0" />
-                          <div>
-                            <p className="text-red-700">{error.message}</p>
-                            {error.field && error.rowIndex !== undefined && (
-                              <p className="text-red-600 text-xs mt-1">
-                                {"Row " + (error.rowIndex + 1) + ", Field: " + error.field}
-                              </p>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                  </div>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="workers">
-          <Card>
-            <CardHeader>
-              <CardTitle>Workers Data</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="overflow-x-auto">
-                <WorkersTable />
-              </div>
-              {validationErrors.filter((error) => error.entity === "workers").length > 0 && (
-                <div className="mt-6 p-4 bg-red-50 border border-red-200 rounded-lg">
-                  <h4 className="font-medium text-red-800 mb-3">Validation Errors in Workers Data:</h4>
-                  <div className="space-y-2">
-                    {validationErrors
-                      .filter((error) => error.entity === "workers")
-                      .map((error) => (
-                        <div key={error.id} className="flex items-start space-x-3 text-sm">
-                          <XCircle className="h-4 w-4 text-red-500 mt-0.5 flex-shrink-0" />
-                          <div>
-                            <p className="text-red-700">{error.message}</p>
-                            {error.field && error.rowIndex !== undefined && (
-                              <p className="text-red-600 text-xs mt-1">
-                                Row {error.rowIndex + 1}, Field: {error.field}
-                              </p>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                  </div>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="tasks">
-          <Card>
-            <CardHeader>
-              <CardTitle>Tasks Data</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="overflow-x-auto">
-                <TasksTable />
-              </div>
-              {validationErrors.filter((error) => error.entity === "tasks").length > 0 && (
-                <div className="mt-6 p-4 bg-red-50 border border-red-200 rounded-lg">
-                  <h4 className="font-medium text-red-800 mb-3">Validation Errors in Tasks Data:</h4>
-                  <div className="space-y-2">
-                    {validationErrors
-                      .filter((error) => error.entity === "tasks")
-                      .map((error) => (
-                        <div key={error.id} className="flex items-start space-x-3 text-sm">
-                          <XCircle className="h-4 w-4 text-red-500 mt-0.5 flex-shrink-0" />
-                          <div>
-                            <p className="text-red-700">{error.message}</p>
-                            {error.field && error.rowIndex !== undefined && (
-                              <p className="text-red-600 text-xs mt-1">
-                                Row {error.rowIndex + 1}, Field: {error.field}
-                              </p>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                  </div>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
       </Tabs>
-    </div>
+
+      {notice && (
+        <Alert>
+          <div className="flex items-start gap-2">
+            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+            <AlertDescription className="leading-relaxed">
+              {notice}
+            </AlertDescription>
+          </div>
+        </Alert>
+      )}
+
+      {error && (
+        <Alert variant="destructive">
+          <div className="flex items-start gap-2">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+            <AlertDescription className="leading-relaxed">
+              {error}
+            </AlertDescription>
+          </div>
+        </Alert>
+      )}
+
+      {rules.length > 0 && (
+        <div className="rounded-md border border-slate-200 bg-white px-3 py-2">
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-medium text-slate-950">
+                Apply audit rules
+              </div>
+              <div className="text-xs text-slate-500">
+                Rules compile once, save locally, then validate this file instantly.
+              </div>
+            </div>
+
+            <Badge variant="outline">
+              {activeDataset.appliedRuleIds.length} active
+            </Badge>
+          </div>
+
+          <div className="mb-3 rounded-md border border-red-200 bg-red-50 px-3 py-2">
+            <div className="text-xs font-semibold text-red-700">
+              Applied rules cannot be removed.
+            </div>
+
+            <div className="mt-1 text-xs leading-relaxed text-red-600">
+              Once a rule is applied to this dataset, it becomes permanent for the
+              uploaded file. To change applied rules, you must drop and upload the
+              file again. Apply rules carefully.
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            {rules.map((rule) => {
+              const applied = activeDataset.appliedRuleIds.includes(rule.id)
+
+              const breakCount = activeIssues.filter(
+                (issue) => issue.ruleId === rule.id
+              ).length
+
+              return (
+                <Button
+                  key={rule.id}
+                  size="sm"
+                  variant={applied ? "secondary" : "outline"}
+                  disabled={
+                    Boolean(applyingRuleId) || applied || !rule.active
+                  }
+                  onClick={() => applyRule(rule.id)}
+                  className="h-8"
+                >
+                  {applyingRuleId === rule.id ? (
+                    <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <ShieldCheck className="mr-2 h-3.5 w-3.5" />
+                  )}
+
+                  {rule.name}
+
+                  {applied && (
+                    <span className="ml-2 text-xs">
+                      {breakCount} breaks
+                    </span>
+                  )}
+                </Button>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      <Card className="rounded-md">
+        <CardContent className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between">
+          <div>
+            <div className="font-medium text-slate-950">Schema mapping</div>
+            <div className="text-sm text-slate-500">Scenario Planner reads this saved Amount mapping for calculations.</div>
+          </div>
+          <div className="w-full md:w-72">
+            <Select value={activeDataset.schemaMapping.Amount ?? ""} onValueChange={updateAmountMapping}>
+              <SelectTrigger>
+                <SelectValue placeholder="Choose Amount source column" />
+              </SelectTrigger>
+              <SelectContent>
+                {activeDataset.headers.map((header) => (
+                  <SelectItem key={header} value={header}>
+                    {header}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </CardContent>
+      </Card>
+
+      <div className="rounded-md border border-slate-200 bg-white">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 px-4 py-3">
+          <div className="font-medium text-slate-950">{activeDataset.fileName}</div>
+          <div className="flex gap-2 text-sm">
+            <Badge variant="outline">{activeDataset.type}</Badge>
+            <Badge variant={activeIssues.some((issue) => issue.severity === "error") ? "destructive" : "secondary"}>
+              {activeIssues.length} issues
+            </Badge>
+          </div>
+        </div>
+
+        <div className="max-h-[68vh] overflow-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="sticky left-0 z-10 w-16 bg-white">#</TableHead>
+                {activeDataset.headers.map((header) => (
+                  <TableHead key={header} className="min-w-44 whitespace-nowrap">
+                    {header}
+                  </TableHead>
+                ))}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {activeDataset.rows.map((row, rowIndex) => (
+                <TableRow key={`${activeDataset.id}-${rowIndex}`}>
+                  <TableCell className="sticky left-0 bg-white font-mono text-xs text-slate-500">{rowIndex + 1}</TableCell>
+                  {activeDataset.headers.map((field) => {
+                    const cellIssues = activeIssues.filter((issue) => issue.rowIndex === rowIndex && issue.field === field)
+                    const rowRuleBreaks = activeIssues.some((issue) => issue.source === "rule" && issue.rowIndex === rowIndex)
+                    const focused = focusTarget?.datasetId === activeDataset.id && focusTarget.rowIndex === rowIndex && focusTarget.field === field
+                    const isEditing = editingCell?.rowIndex === rowIndex && editingCell.field === field
+                    return (
+                      <TableCell
+                        key={field}
+                        className={`max-w-72 align-top ${cellIssues.length || rowRuleBreaks ? "bg-red-50" : ""} ${focused ? "ring-2 ring-slate-950" : ""}`}
+                        onDoubleClick={() => {
+                          appActions.setFocusTarget(null)
+                          setEditingCell({ rowIndex, field })
+                          setEditValue(String(row[field] ?? ""))
+                        }}
+                      >
+                        {isEditing ? (
+                          <div className="flex min-w-56 items-center gap-1">
+                            <Input value={editValue} onChange={(event) => setEditValue(event.target.value)} autoFocus />
+                            <Button size="sm" variant="ghost" onClick={saveEdit}>
+                              <Save className="h-4 w-4" />
+                            </Button>
+                            <Button size="sm" variant="ghost" onClick={() => setEditingCell(null)}>
+                              <X className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        ) : (
+                          <div className="group flex items-start justify-between gap-2">
+                            <span className="break-words text-sm">{String(row[field] ?? "")}</span>
+                            {cellIssues.length > 0 && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-7 opacity-0 group-hover:opacity-100"
+                                onClick={() => applyCorrection(rowIndex, field, `Fix ${field} in this row according to validation issue: ${cellIssues[0].message}`)}
+                              >
+                                <Sparkles className="h-3.5 w-3.5" />
+                              </Button>
+                            )}
+                          </div>
+                        )}
+                      </TableCell>
+                    )
+                  })}
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      </div>
+    </section>
   )
 }

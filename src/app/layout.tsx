@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import { StoreProvider } from "@/components/store-provider"
 const geistSans = Geist({
   variable: "--font-geist-sans",
   subsets: ["latin"],
@@ -13,8 +12,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Data AiChemist",
-  description: "Website that helps you to clean your data with AI",
+  title: "Abacum Data Pilot",
+  description: "FinOps data ingestion, schema validation, AI correction, and scenario planning MVP.",
 };
 
 export default function RootLayout({
@@ -27,9 +26,7 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        <StoreProvider>
-          {children}
-        </StoreProvider>
+        {children}
       </body>
     </html>
   );

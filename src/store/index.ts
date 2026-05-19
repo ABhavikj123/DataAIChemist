@@ -1,102 +1,135 @@
-import { configureStore, createSlice, type PayloadAction } from "@reduxjs/toolkit"
-import type { AppState, Client, Worker, Task, ValidationError, Rule, PriorityWeights } from "@/types"
+"use client"
 
-const initialState: AppState = {
-  clients: [],
-  workers: [],
-  tasks: [],
-  validationErrors: [],
-  rules: [],
-  priorityWeights: {
-    priorityLevel: 0.3,
-    fairness: 0.2,
-    efficiency: 0.2,
-    skillMatch: 0.2,
-    phasePreference: 0.1,
-  },
-  isLoading: false,
-  searchQuery: "",
-  selectedEntity: "clients",
+import { useSyncExternalStore } from "react"
+import type { AppState, AuditRule, FinancialDataset, GridFocusTarget, ScenarioInputs, ValidationIssue } from "@/types"
+
+const defaultScenario: ScenarioInputs = {
+  revenueGrowth: 8,
+  expenseCut: 4,
+  headcountBuffer: 2,
 }
 
-const appSlice = createSlice({
-  name: "app",
-  initialState,
-  reducers: {
-    setClients: (state, action: PayloadAction<Client[]>) => {
-      state.clients = action.payload
-    },
-    setWorkers: (state, action: PayloadAction<Worker[]>) => {
-      state.workers = action.payload
-    },
-    setTasks: (state, action: PayloadAction<Task[]>) => {
-      state.tasks = action.payload
-    },
-    setValidationErrors: (state, action: PayloadAction<ValidationError[]>) => {
-      state.validationErrors = action.payload
-    },
-    setRules: (state, action: PayloadAction<Rule[]>) => {
-      state.rules = action.payload
-    },
-    addRule: (state, action: PayloadAction<Rule>) => {
-      state.rules.push(action.payload)
-    },
-    updateRule: (state, action: PayloadAction<{ id: string; updates: Partial<Rule> }>) => {
-      const index = state.rules.findIndex((rule) => rule.id === action.payload.id)
-      if (index !== -1) {
-        state.rules[index] = { ...state.rules[index], ...action.payload.updates }
+const initialState: AppState = {
+  datasets: [],
+  activeDatasetId: null,
+  validationIssues: [],
+  rules: [],
+  scenario: defaultScenario,
+  isLoading: false,
+  searchQuery: "",
+  focusTarget: null,
+}
+
+type Listener = () => void
+type Selector<T> = (state: AppState) => T
+
+let state = initialState
+const listeners = new Set<Listener>()
+
+function emit() {
+  listeners.forEach((listener) => listener())
+}
+
+function setState(updater: Partial<AppState> | ((current: AppState) => AppState)) {
+  state = typeof updater === "function" ? updater(state) : { ...state, ...updater }
+  emit()
+}
+
+function subscribe(listener: Listener) {
+  listeners.add(listener)
+  return () => listeners.delete(listener)
+}
+
+function getSnapshot() {
+  return state
+}
+
+export function useAppStore<T>(selector: Selector<T>): T {
+  const current = useSyncExternalStore(subscribe, getSnapshot, () => initialState)
+  return selector(current)
+}
+
+export const appActions = {
+  setDatasets(datasets: FinancialDataset[]) {
+    setState((current) => ({
+      ...current,
+      datasets,
+      activeDatasetId:
+        current.activeDatasetId && datasets.some((dataset) => dataset.id === current.activeDatasetId)
+          ? current.activeDatasetId
+          : datasets[0]?.id ?? null,
+    }))
+  },
+  upsertDataset(dataset: FinancialDataset) {
+    setState((current) => {
+      const exists = current.datasets.some((item) => item.id === dataset.id)
+      const datasets = exists
+        ? current.datasets.map((item) => (item.id === dataset.id ? dataset : item))
+        : [dataset, ...current.datasets]
+      return {
+        ...current,
+        datasets,
+        activeDatasetId: current.activeDatasetId ?? dataset.id,
       }
-    },
-    deleteRule: (state, action: PayloadAction<string>) => {
-      state.rules = state.rules.filter((rule) => rule.id !== action.payload)
-    },
-    setPriorityWeights: (state, action: PayloadAction<PriorityWeights>) => {
-      state.priorityWeights = action.payload
-    },
-    setLoading: (state, action: PayloadAction<boolean>) => {
-      state.isLoading = action.payload
-    },
-    setSearchQuery: (state, action: PayloadAction<string>) => {
-      state.searchQuery = action.payload
-    },
-    setSelectedEntity: (state, action: PayloadAction<"clients" | "workers" | "tasks">) => {
-      state.selectedEntity = action.payload
-    },
-    updateClient: (state, action: PayloadAction<{ index: number; client: Client }>) => {
-      state.clients[action.payload.index] = action.payload.client
-    },
-    updateWorker: (state, action: PayloadAction<{ index: number; worker: Worker }>) => {
-      state.workers[action.payload.index] = action.payload.worker
-    },
-    updateTask: (state, action: PayloadAction<{ index: number; task: Task }>) => {
-      state.tasks[action.payload.index] = action.payload.task
-    },
+    })
   },
-})
-
-export const {
-  setClients,
-  setWorkers,
-  setTasks,
-  setValidationErrors,
-  setRules,
-  addRule,
-  updateRule,
-  deleteRule,
-  setPriorityWeights,
-  setLoading,
-  setSearchQuery,
-  setSelectedEntity,
-  updateClient,
-  updateWorker,
-  updateTask,
-} = appSlice.actions
-
-export const store = configureStore({
-  reducer: {
-    app: appSlice.reducer,
+  removeDataset(id: string) {
+    setState((current) => {
+      const datasets = current.datasets.filter((dataset) => dataset.id !== id)
+      return {
+        ...current,
+        datasets,
+        activeDatasetId: current.activeDatasetId === id ? datasets[0]?.id ?? null : current.activeDatasetId,
+        validationIssues: current.validationIssues.filter((issue) => issue.datasetId !== id),
+        rules: current.rules.map((rule) => ({
+          ...rule,
+          targetDatasetIds: rule.targetDatasetIds.filter((datasetId) => datasetId !== id),
+        })),
+      }
+    })
   },
-})
-
-export type RootState = ReturnType<typeof store.getState>
-export type AppDispatch = typeof store.dispatch
+  updateDataset(dataset: FinancialDataset) {
+    setState((current) => ({
+      ...current,
+      datasets: current.datasets.map((item) => (item.id === dataset.id ? dataset : item)),
+    }))
+  },
+  updateDatasetRows(datasetId: string, rows: FinancialDataset["rows"]) {
+    setState((current) => ({
+      ...current,
+      datasets: current.datasets.map((dataset) =>
+        dataset.id === datasetId ? { ...dataset, rows, updatedAt: new Date().toISOString() } : dataset,
+      ),
+    }))
+  },
+  setActiveDatasetId(activeDatasetId: string | null) {
+    setState({ activeDatasetId })
+  },
+  setValidationIssues(validationIssues: ValidationIssue[]) {
+    setState({ validationIssues })
+  },
+  setRules(rules: AuditRule[]) {
+    setState({ rules })
+  },
+  addRule(rule: AuditRule) {
+    setState((current) => ({ ...current, rules: [...current.rules, rule] }))
+  },
+  updateRule(rule: AuditRule) {
+    setState((current) => ({ ...current, rules: current.rules.map((item) => (item.id === rule.id ? rule : item)) }))
+  },
+  deleteRule(id: string) {
+    setState((current) => ({ ...current, rules: current.rules.filter((rule) => rule.id !== id) }))
+  },
+  setScenario(scenario: ScenarioInputs) {
+    setState({ scenario })
+  },
+  setLoading(isLoading: boolean) {
+    setState({ isLoading })
+  },
+  setSearchQuery(searchQuery: string) {
+    setState({ searchQuery })
+  },
+  setFocusTarget(focusTarget: GridFocusTarget | null) {
+    setState({ focusTarget })
+  },
+}

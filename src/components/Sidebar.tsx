@@ -1,75 +1,61 @@
 "use client"
 
 import { useState } from "react"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent } from "@/components/ui/card"
+import { AlertTriangle, BarChart3, Database, Download, FileUp, Menu, Search, Settings, SlidersHorizontal, X } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
-import { useSelector } from "react-redux"
-import type { RootState } from "@/store"
-import {
-  Upload,
-  CheckCircle,
-  Settings,
-  Sliders,
-  Download,
-  Database,
-  Search,
-  AlertTriangle,
-  Menu,
-  X,
-} from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { useAppStore } from "@/store"
 
 interface SidebarProps {
   activeSection: string
   onSectionChange: (section: string) => void
 }
 
+const sections = [
+  { id: "upload", label: "Ingestion", icon: FileUp },
+  { id: "data", label: "Financial Ledger", icon: Database },
+  { id: "search", label: "English Query", icon: Search },
+  { id: "validate", label: "Data Validation", icon: BarChart3 },
+  { id: "rules", label: "Audit Controls", icon: Settings },
+  { id: "priority", label: "Scenario Planner", icon: SlidersHorizontal },
+  { id: "export", label: "Accounting Export", icon: Download },
+]
+
 export default function Sidebar({ activeSection, onSectionChange }: SidebarProps) {
   const [isOpen, setIsOpen] = useState(false)
-  const validationErrors = useSelector((state: RootState) => state.app.validationErrors)
-  const errorCount = validationErrors.filter((error) => error.type === "error").length
-  const warningCount = validationErrors.filter((error) => error.type === "warning").length
+  const { datasets, validationIssues } = useAppStore((state) => ({
+    datasets: state.datasets,
+    validationIssues: state.validationIssues,
+  }))
+  const issueCount = validationIssues.length
+  const errorCount = validationIssues.filter((issue) => issue.severity === "error").length
 
-  const sections = [
-    { id: "upload", label: "Data Upload", icon: Upload },
-    { id: "data", label: "Data Grid", icon: Database },
-    { id: "search", label: "Natural Search", icon: Search },
-    { id: "validate", label: "Validation", icon: CheckCircle, badge: errorCount + warningCount },
-    { id: "rules", label: "Business Rules", icon: Settings },
-    { id: "priority", label: "Prioritization", icon: Sliders },
-    { id: "export", label: "Export", icon: Download },
-  ]
-
-  const SidebarContent = () => (
-    <div className="h-full bg-white border-r border-gray-200 p-4">
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold text-gray-900">Data Alchemist</h1>
-        <p className="text-sm text-gray-600 mt-1">Spreadsheet Chaos Solver</p>
+  const content = (
+    <aside className="h-full border-r border-slate-200 bg-white px-3 py-4">
+      <div className="px-2 pb-6">
+        <div className="text-xl font-semibold tracking-tight text-slate-950">Abacum Data Pilot</div>
+        <div className="mt-1 text-xs font-medium uppercase text-slate-500">FinOps schema linter</div>
       </div>
 
-      <nav className="space-y-2">
+      <nav className="space-y-1">
         {sections.map((section) => {
           const Icon = section.icon
-          const isActive = activeSection === section.id
-
+          const active = activeSection === section.id
           return (
             <Button
               key={section.id}
-              variant={isActive ? "default" : "ghost"}
-              className={`w-full justify-start ${isActive ? "bg-blue-600 text-white" : "text-gray-700 hover:bg-gray-100"}`}
+              variant={active ? "default" : "ghost"}
+              className={`h-10 w-full justify-start rounded-md ${active ? "bg-slate-950 text-white" : "text-slate-700"}`}
               onClick={() => {
                 onSectionChange(section.id)
                 setIsOpen(false)
               }}
             >
               <Icon className="mr-3 h-4 w-4" />
-              {section.label}
-              {section.badge && section.badge > 0 && (
-                <Badge
-                  variant={section.id === "validate" && errorCount > 0 ? "destructive" : "secondary"}
-                  className="ml-auto"
-                >
-                  {section.badge}
+              <span className="truncate">{section.label}</span>
+              {section.id === "validate" && issueCount > 0 && (
+                <Badge variant={errorCount > 0 ? "destructive" : "secondary"} className="ml-auto">
+                  {issueCount}
                 </Badge>
               )}
             </Button>
@@ -77,43 +63,41 @@ export default function Sidebar({ activeSection, onSectionChange }: SidebarProps
         })}
       </nav>
 
-      {validationErrors.length > 0 && (
-        <Card className="mt-6">
-          <CardContent className="p-4">
-            <div className="flex items-center mb-2">
-              <AlertTriangle className="h-4 w-4 text-yellow-500 mr-2" />
-              <span className="text-sm font-medium">Validation Status</span>
-            </div>
-            <div className="space-y-1 text-sm">
-              {errorCount > 0 && <div className="text-red-600">{errorCount} errors</div>}
-              {warningCount > 0 && <div className="text-yellow-600">{warningCount} warnings</div>}
-            </div>
-          </CardContent>
-        </Card>
-      )}
-    </div>
+      <div className="mt-6 rounded-md border border-slate-200 p-3 text-sm">
+        <div className="flex items-center justify-between text-slate-600">
+          <span>Datasets</span>
+          <span className="font-semibold text-slate-950">{datasets.length}</span>
+        </div>
+        <div className="mt-2 flex items-center justify-between text-slate-600">
+          <span>Validation</span>
+          <span className={errorCount > 0 ? "font-semibold text-red-600" : "font-semibold text-emerald-700"}>
+            {errorCount > 0 ? `${errorCount} errors` : "clean"}
+          </span>
+        </div>
+        {issueCount > 0 && (
+          <div className="mt-3 flex items-start gap-2 border-t border-slate-200 pt-3 text-xs text-slate-500">
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 text-amber-500" />
+            <span>Open the validation console to jump straight to affected cells.</span>
+          </div>
+        )}
+      </div>
+    </aside>
   )
 
   return (
     <>
-      <Button
-        variant="ghost"
-        size="sm"
-        className="md:hidden fixed top-4 left-4 z-50"
-        onClick={() => setIsOpen(!isOpen)}
-      >
-        {isOpen ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
+      <Button variant="outline" size="sm" className="fixed left-3 top-3 z-50 md:hidden" onClick={() => setIsOpen(true)}>
+        <Menu className="h-4 w-4" />
       </Button>
-
-      <div className="hidden md:block w-64 h-screen">
-        <SidebarContent />
-      </div>
-
+      <div className="hidden h-screen w-72 shrink-0 md:block">{content}</div>
       {isOpen && (
-        <div className="md:hidden fixed inset-0 z-40">
-          <div className="fixed inset-0 bg-black bg-opacity-50" onClick={() => setIsOpen(false)} />
-          <div className="fixed left-0 top-0 w-64 h-full">
-            <SidebarContent />
+        <div className="fixed inset-0 z-50 md:hidden">
+          <button className="absolute inset-0 bg-slate-950/40" aria-label="Close navigation" onClick={() => setIsOpen(false)} />
+          <div className="relative h-full w-72 bg-white">
+            <Button variant="ghost" size="sm" className="absolute right-2 top-2 z-10" onClick={() => setIsOpen(false)}>
+              <X className="h-4 w-4" />
+            </Button>
+            {content}
           </div>
         </div>
       )}

@@ -1,85 +1,117 @@
-export interface Client {
-  [key: string]: unknown
-  ClientID: string
-  ClientName: string
-  PriorityLevel: number
-  RequestedTaskIDs: string
-  GroupTag: string
-  AttributesJSON: string
+export type DatasetType = "ledger" | "budget" | "vendor" | "forecast" | "unmapped"
+export type DatasetStatus = "parsed" | "validating" | "ready" | "error"
+export type IssueSeverity = "error" | "warning"
+export type IssueSource = "schema" | "rule"
+export type DataValue = string | number | boolean | null
+export type DataRow = Record<string, DataValue>
+
+export interface SchemaMapping {
+  Amount?: string
+  Date?: string
+  Vendor?: string
+  Account?: string
+  Description?: string
 }
 
-export interface Worker {
-  [key: string]: unknown
-  WorkerID: string
-  WorkerName: string
-  Skills: string
-  AvailableSlots: string
-  MaxLoadPerPhase: number
-  WorkerGroup: string
-  QualificationLevel: string
+export type RuleFormulaOperator =
+  | "required"
+  | "number_gte"
+  | "number_lte"
+  | "number_gt"
+  | "number_lt"
+  | "equals"
+  | "contains"
+  | "valid_json"
+  | "uppercase"
+
+export interface RuleFormula {
+  field: string
+  operator: RuleFormulaOperator
+  value?: string | number
 }
 
-export interface Task {
-  [key: string]: unknown
-  TaskID: string
-  TaskName: string
-  Category: string
-  Duration: number
-  RequiredSkills: string
-  PreferredPhases: string
-  MaxConcurrent: number
+export interface DatasetMetadata {
+  size: number
+  mimeType: string
+  source: "upload" | "sample" | "import"
 }
 
-export interface ValidationError {
+export interface FinancialDataset {
   id: string
-  type: "error" | "warning"
-  message: string
-  field?: string
+  name: string
+  fileName: string
+  type: DatasetType
+  status: DatasetStatus
+  headers: string[]
+  rows: DataRow[]
+  schemaMapping: SchemaMapping
+  appliedRuleIds: string[]
+  createdAt: string
+  updatedAt: string
+  metadata: DatasetMetadata
+}
+
+export interface ValidationIssue {
+  id: string
+  datasetId: string
+  datasetName: string
   rowIndex?: number
-  entity: "clients" | "workers" | "tasks"
+  field?: string
+  severity: IssueSeverity
+  source: IssueSource
+  code: string
+  message: string
+  ruleId?: string
+  ruleName?: string
 }
 
-export interface Rule {
+export interface AuditRule {
   id: string
-  type: "coRun" | "slotRestriction" | "loadLimit" | "phaseWindow" | "patternMatch" | "precedenceOverride"
   name: string
   description: string
-  parameters: Record<string, unknown>
-  priority: number
+  field: string
+  operator: "required" | "positive" | "negative" | "json" | "uppercase" | "contains"
+  expectedValue?: string
+  targetDatasetIds: string[]
+  formulaAvailable: boolean
+  formula?: RuleFormula
+  aiEvaluationRequired: boolean
+  compiledAt?: string
   active: boolean
+  createdAt: string
 }
 
-export interface PriorityWeights {
-  priorityLevel: number
-  fairness: number
-  efficiency: number
-  skillMatch: number
-  phasePreference: number
+export interface ScenarioInputs {
+  revenueGrowth: number
+  expenseCut: number
+  headcountBuffer: number
+}
+
+export interface GridFocusTarget {
+  datasetId: string
+  rowIndex: number
+  field: string
 }
 
 export interface AppState {
-  clients: Client[]
-  workers: Worker[]
-  tasks: Task[]
-  validationErrors: ValidationError[]
-  rules: Rule[]
-  priorityWeights: PriorityWeights
+  datasets: FinancialDataset[]
+  activeDatasetId: string | null
+  validationIssues: ValidationIssue[]
+  rules: AuditRule[]
+  scenario: ScenarioInputs
   isLoading: boolean
   searchQuery: string
-  selectedEntity: "clients" | "workers" | "tasks"
+  focusTarget: GridFocusTarget | null
 }
 
-export type DataRecord = Client | Worker | Task
-export type EntityType = "clients" | "workers" | "tasks"
-export type CorrectedDataResponse = {
-  clients: Client[]
-  workers: Worker[]
-  tasks: Task[]
+export interface GeminiCorrectionRequest {
+  dataset: FinancialDataset
+  instruction: string
+  rowIndex?: number
+  field?: string
 }
 
-export interface AIRuleResponse {
-  type: "coRun" | "slotRestriction" | "loadLimit" | "phaseWindow" | "patternMatch" | "precedenceOverride"
-  name: string
-  description: string
-  parameters: Record<string, unknown>
+export interface GeminiCorrectionResponse {
+  rows: DataRow[]
+  summary: string
 }
