@@ -19,10 +19,15 @@ export type RuleFormulaOperator =
   | "number_lte"
   | "number_gt"
   | "number_lt"
-  | "equals"
+  | "equal"
+  | "not_equal"
   | "contains"
+  | "does_not_contain"
+  | "starts_with"
+  | "ends_with"
   | "valid_json"
   | "uppercase"
+  | "lowercase";
 
 export interface RuleFormula {
   field: string
@@ -70,7 +75,21 @@ export interface AuditRule {
   name: string
   description: string
   field: string
-  operator: "required" | "positive" | "negative" | "json" | "uppercase" | "contains"
+  operator: 
+  | "required" 
+  | "equal" 
+  | "not_equal" 
+  | "contains" 
+  | "does_not_contain" 
+  | "starts_with" 
+  | "ends_with" 
+  | "positive" 
+  | "negative" 
+  | "greater_than" 
+  | "less_than" 
+  | "json" 
+  | "uppercase" 
+  | "lowercase";
   expectedValue?: string
   targetDatasetIds: string[]
   formulaAvailable: boolean

@@ -165,24 +165,61 @@ export function castValueForField(field: string, value: string): DataValue {
 
 export function doesRulePass(value: DataValue, rule: AuditRule): boolean {
   if (rule.formula) return doesFormulaPass(value, rule.formula)
+
+  const stringValue = String(value ?? "");
+  const expectedString = String(rule.expectedValue ?? "");
+
   switch (rule.operator) {
     case "required":
       return !isBlank(value)
+
+    case "equal":
+      return stringValue === expectedString
+
+    case "not_equal":
+      return stringValue !== expectedString
+
+    case "contains":
+      return stringValue.includes(expectedString)
+
+    case "does_not_contain":
+      return !stringValue.includes(expectedString)
+
+    case "starts_with":
+      return stringValue.startsWith(expectedString)
+
+    case "ends_with":
+      return stringValue.endsWith(expectedString)
+
     case "positive":
       return isNumeric(value) && Number(value) >= 0
+
     case "negative":
       return isNumeric(value) && Number(value) <= 0
+
+    case "greater_than": {
+      const expected = rule.expectedValue ?? "";
+      return isNumeric(value) && isNumeric(expected) && Number(value) > Number(expected);
+    }
+
+    case "less_than": {
+      const expected = rule.expectedValue ?? "";
+      return isNumeric(value) && isNumeric(expected) && Number(value) < Number(expected);
+    }
     case "json":
       try {
-        JSON.parse(String(value ?? ""))
+        JSON.parse(stringValue)
         return true
       } catch {
         return false
       }
+
     case "uppercase":
-      return String(value ?? "") === String(value ?? "").toUpperCase()
-    case "contains":
-      return String(value ?? "").includes(rule.expectedValue ?? "")
+      return stringValue === stringValue.toUpperCase()
+
+    case "lowercase":
+      return stringValue === stringValue.toLowerCase()
+
     default:
       return true
   }
@@ -191,6 +228,10 @@ export function doesRulePass(value: DataValue, rule: AuditRule): boolean {
 export function doesFormulaPass(value: DataValue, formula: RuleFormula): boolean {
   const text = String(value ?? "")
   const number = parseFloat(text.replace(/[$,%\s,]/g, ""))
+
+  const formulaTextLower = String(formula.value ?? "").toLowerCase()
+  const textLower = text.toLowerCase()
+
   switch (formula.operator) {
     case "required":
       return !isBlank(value)
@@ -202,10 +243,18 @@ export function doesFormulaPass(value: DataValue, formula: RuleFormula): boolean
       return Number.isFinite(number) && number > Number(formula.value)
     case "number_lt":
       return Number.isFinite(number) && number < Number(formula.value)
-    case "equals":
-      return text.toLowerCase() === String(formula.value ?? "").toLowerCase()
+    case "equal":
+      return textLower === formulaTextLower
+    case "not_equal":
+      return textLower !== formulaTextLower
     case "contains":
-      return text.toLowerCase().includes(String(formula.value ?? "").toLowerCase())
+      return textLower.includes(formulaTextLower)
+    case "does_not_contain":
+      return !textLower.includes(formulaTextLower)
+    case "starts_with":
+      return textLower.startsWith(formulaTextLower)
+    case "ends_with":
+      return textLower.endsWith(formulaTextLower)
     case "valid_json":
       try {
         JSON.parse(text)
@@ -215,6 +264,8 @@ export function doesFormulaPass(value: DataValue, formula: RuleFormula): boolean
       }
     case "uppercase":
       return text === text.toUpperCase()
+    case "lowercase":
+      return text === text.toLowerCase()
     default:
       return true
   }

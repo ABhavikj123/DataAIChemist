@@ -12,7 +12,22 @@ import { validateDatasets } from "@/lib/validation"
 import { appActions, useAppStore } from "@/store"
 import type { AuditRule } from "@/types"
 
-const operators: AuditRule["operator"][] = ["required", "positive", "negative", "json", "uppercase", "contains"]
+const operators: AuditRule["operator"][] = [
+  "required", 
+  "equal", 
+  "not_equal", 
+  "contains", 
+  "does_not_contain", 
+  "starts_with", 
+  "ends_with", 
+  "positive", 
+  "negative", 
+  "greater_than", 
+  "less_than", 
+  "json", 
+  "uppercase", 
+  "lowercase"
+];
 
 export default function RulesEditor() {
   const { datasets, rules } = useAppStore((state) => ({ datasets: state.datasets, rules: state.rules }))

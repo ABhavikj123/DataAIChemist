@@ -24,16 +24,32 @@ function localFormula(rule: AuditRule, headers: string[]): RuleFormula | undefin
   switch (rule.operator) {
     case "required":
       return { field, operator: "required" }
+    case "equal":
+      return { field, operator: "equal", value: rule.expectedValue ?? "" }
+    case "not_equal":
+      return { field, operator: "not_equal", value: rule.expectedValue ?? "" }
+    case "contains":
+      return { field, operator: "contains", value: rule.expectedValue ?? "" }
+    case "does_not_contain":
+      return { field, operator: "does_not_contain", value: rule.expectedValue ?? "" }
+    case "starts_with":
+      return { field, operator: "starts_with", value: rule.expectedValue ?? "" }
+    case "ends_with":
+      return { field, operator: "ends_with", value: rule.expectedValue ?? "" }
     case "positive":
       return { field, operator: "number_gte", value: 0 }
     case "negative":
       return { field, operator: "number_lte", value: 0 }
+    case "greater_than":
+      return { field, operator: "number_gt", value: rule.expectedValue ?? "" }
+    case "less_than":
+      return { field, operator: "number_lt", value: rule.expectedValue ?? "" }
     case "json":
       return { field, operator: "valid_json" }
     case "uppercase":
       return { field, operator: "uppercase" }
-    case "contains":
-      return { field, operator: "contains", value: rule.expectedValue ?? "" }
+    case "lowercase":
+      return { field, operator: "lowercase" }
     default:
       return undefined
   }
@@ -71,7 +87,7 @@ Convert this audit rule into a deterministic formula this app can run locally.
 Return only JSON:
 {
   "formulaAvailable": true,
-  "formula": { "field": "exact source header", "operator": "required|number_gte|number_lte|number_gt|number_lt|equals|contains|valid_json|uppercase", "value": "optional" },
+  "formula": { "field": "exact source header", "operator": "required|number_gte|number_lte|number_gt|number_lt|equal|not_equal|contains|does_not_contain|starts_with|ends_with|valid_json|uppercase|lowercase", "value": "optional" },
   "summary": "short explanation"
 }
 
